@@ -2,11 +2,13 @@ package main
 import (
   "log"
   "fmt"
+	"time"
   "net/http"
   "os"
 	"io/ioutil"
 	"database/sql"
 	_ "github.com/lib/pq"
+	"github.com/gorilla/mux"
 )
 
 func determineListenAddress() (string, error) {
@@ -56,18 +58,33 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 		email string
 		firstname string
 		lastname string
-		passhash string
 	)
 
 	for rows.Next() {
-		err := rows.Scan(&email, &firstname, &lastname, &passhash)
+		err := rows.Scan(&email, &firstname, &lastname)
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Println(email, firstname, lastname, passhash)
+		log.Println(email, firstname, lastname)
 	}
 
   fmt.Fprintln(w, "OK")
+}
+
+func userHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "user")
+}
+
+func userListsHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "userLists")
+}
+
+func taskHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "tasks")
+}
+
+func listHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "lists")
 }
 
 func main() {
@@ -76,11 +93,21 @@ func main() {
     log.Fatal(err)
   }
 
-  http.HandleFunc("/", mainHandler)
-	http.HandleFunc("/db", dbHandler)
+	r := mux.NewRouter()
+	r.HandleFunc("/", mainHandler)
+	r.HandleFunc("/db", dbHandler)
+	r.HandleFunc("/users/{id}", userHandler)
+	r.HandleFunc("/users/{id}/lists", userListsHandler)
+	r.HandleFunc("/tasks/{id}", taskHandler)
+	r.HandleFunc("/lists/{id}", listHandler)
+	
+	srv := &http.Server{
+		Handler:      r,
+		Addr:         addr,
+		// Good practice: enforce timeouts for servers you create!
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
 
-  log.Printf("Listening on %s...\n", addr)
-  if err := http.ListenAndServe(addr, nil); err != nil {
-    panic(err)
-  }
+	log.Fatal(srv.ListenAndServe())
 }
