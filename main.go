@@ -3,13 +3,23 @@ import (
   "log"
   "fmt"
 	"time"
-  "net/http"
   "os"
+	"encoding/json"
+  "net/http"
 	"io/ioutil"
 	"database/sql"
 	_ "github.com/lib/pq"
 	"github.com/gorilla/mux"
 )
+
+var db *sql.DB
+
+type User struct {
+	Id int
+	Email string
+	FirstName string
+	LastName string
+}
 
 func determineListenAddress() (string, error) {
   port := os.Getenv("PORT")
@@ -42,11 +52,6 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func dbHandler(w http.ResponseWriter, r *http.Request) {
-	db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	rows, err := db.Query("select * from users")
 	if err != nil {
 		log.Fatal(err)
@@ -72,7 +77,36 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "user")
+	vars := mux.Vars(r)
+	userId := vars["userId"]
+	query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", userId)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer rows.Close()
+	
+	if !(rows.Next()) {
+		fmt.Fprintf(w, "user not found")
+		return
+	}
+
+	var (
+		email string
+		firstname string
+		lastname string
+		id int
+	)
+	err = rows.Scan(&email, &firstname, &lastname, &id)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	user := User{id, email, firstname, lastname}
+	json.NewEncoder(w).Encode(user)
 }
 
 func userListsHandler(w http.ResponseWriter, r *http.Request) {
@@ -93,13 +127,21 @@ func main() {
     log.Fatal(err)
   }
 
+	log.Println("opening connection to database")
+	db, err = sql.Open("postgres", os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	r := mux.NewRouter()
 	r.HandleFunc("/", mainHandler)
 	r.HandleFunc("/db", dbHandler)
-	r.HandleFunc("/users/{id}", userHandler)
-	r.HandleFunc("/users/{id}/lists", userListsHandler)
-	r.HandleFunc("/tasks/{id}", taskHandler)
-	r.HandleFunc("/lists/{id}", listHandler)
+	r.HandleFunc("/users/{userId}", userHandler)
+	r.HandleFunc("/users/{userId}/lists", userListsHandler)
+	r.HandleFunc("/tasks/{taskId}", taskHandler).
+		Methods("GET", "POST", "PUT")
+	r.HandleFunc("/lists/{listId}", listHandler).
+		Methods("GET", "POST", "PUT")
 	
 	srv := &http.Server{
 		Handler:      r,
