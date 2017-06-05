@@ -14,11 +14,30 @@ import (
 
 var db *sql.DB
 
+const MAX_NUM_LISTS = 256 // limit on a user's owned lists
+
 type User struct {
 	Id int
 	Email string
 	FirstName string
 	LastName string
+}
+
+type List struct {
+	Id string
+	Source string
+	RootItem string
+	Owner int
+}
+
+type Item struct {
+	Id string
+	Notes string
+	DateTime1 string
+	DateTime2 string
+	ParentId string
+	Title string
+	Checked string
 }
 
 func determineListenAddress() (string, error) {
@@ -61,8 +80,8 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		email string
-		firstname string
-		lastname string
+		firstname sql.NullString
+		lastname sql.NullString
 	)
 
 	for rows.Next() {
@@ -70,7 +89,7 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Println(email, firstname, lastname)
+		log.Println(email, firstname.String, lastname.String)
 	}
 
   fmt.Fprintln(w, "OK")
@@ -87,7 +106,8 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer rows.Close()
-	
+
+	// TODO: return 404 code
 	if !(rows.Next()) {
 		fmt.Fprintf(w, "user not found")
 		return
@@ -95,8 +115,8 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		email string
-		firstname string
-		lastname string
+		firstname sql.NullString
+		lastname sql.NullString
 		id int
 	)
 	err = rows.Scan(&email, &firstname, &lastname, &id)
@@ -105,20 +125,124 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := User{id, email, firstname, lastname}
+	user := User{id, email, firstname.String, lastname.String}
 	json.NewEncoder(w).Encode(user)
 }
 
 func userListsHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "userLists")
+	vars := mux.Vars(r)
+	userId := vars["userId"]
+	query := fmt.Sprintf("SELECT * FROM lists WHERE owner = %s", userId)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer rows.Close()
+
+	lists := make([]List, 0, MAX_NUM_LISTS)
+	for rows.Next() {
+		var (
+			id string
+			source string
+			root string
+			owner int
+		)
+		err = rows.Scan(&id, &source, &root, &owner)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		
+		lists = append(lists, List{id, source, root, owner})
+	}
+
+	json.NewEncoder(w).Encode(lists)
 }
 
-func taskHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "tasks")
+// TODO: POST and PUT
+func itemHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	itemId := vars["itemId"]
+	query := fmt.Sprintf("SELECT * FROM items WHERE id = '%s'", itemId)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer rows.Close()
+
+	// TODO: return 404 code
+	if !(rows.Next()) {
+		fmt.Fprintf(w, "404: item not found")
+		return
+	}
+
+	var (
+		id string
+		notes sql.NullString
+		dt1 sql.NullString
+		dt2 sql.NullString
+		parentId sql.NullString
+		title string
+		checked string
+	)
+
+	err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId, &title, &checked)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	item := Item{
+		id,
+		notes.String,
+		dt1.String,
+		dt2.String,
+		parentId.String,
+		title,
+		checked,
+	}
+	json.NewEncoder(w).Encode(item)
 }
 
+// TODO: POST and PUT
 func listHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "lists")
+	vars := mux.Vars(r)
+	listId := vars["listId"]
+	query := fmt.Sprintf("SELECT * FROM lists WHERE id = '%s'", listId)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer rows.Close()
+
+	// TODO: return 404 code
+	if !(rows.Next()) {
+		fmt.Fprintf(w, "404: item not found")
+		return
+	}
+
+	var (
+		id string
+		source string
+		root string
+		owner int
+	)
+
+	err = rows.Scan(&id, &source, &root, &owner)
+	if err != nil {
+		// TODO: 500
+		log.Println(err)
+		return
+	}
+
+	list := List{id, source, root, owner}
+	json.NewEncoder(w).Encode(list)	
 }
 
 func main() {
@@ -136,9 +260,10 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/", mainHandler)
 	r.HandleFunc("/db", dbHandler)
-	r.HandleFunc("/users/{userId}", userHandler)
+	r.HandleFunc("/users/{userId}", userHandler).
+		Methods("GET", "POST")
 	r.HandleFunc("/users/{userId}/lists", userListsHandler)
-	r.HandleFunc("/tasks/{taskId}", taskHandler).
+	r.HandleFunc("/items/{itemId}", itemHandler).
 		Methods("GET", "POST", "PUT")
 	r.HandleFunc("/lists/{listId}", listHandler).
 		Methods("GET", "POST", "PUT")
