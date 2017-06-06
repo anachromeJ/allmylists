@@ -15,6 +15,7 @@ import (
 var db *sql.DB
 
 const MAX_NUM_LISTS = 256 // limit on a user's owned lists
+const MAX_NUM_ITEMS = 1024 // limit on items to send with a response
 
 type User struct {
 	Id int
@@ -109,7 +110,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: return 404 code
 	if !(rows.Next()) {
-		fmt.Fprintf(w, "user not found")
+		fmt.Fprintf(w, "404: user not found")
 		return
 	}
 
@@ -223,7 +224,7 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: return 404 code
 	if !(rows.Next()) {
-		fmt.Fprintf(w, "404: item not found")
+		fmt.Fprintf(w, "404: list not found")
 		return
 	}
 
@@ -243,6 +244,65 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 
 	list := List{id, source, root, owner}
 	json.NewEncoder(w).Encode(list)	
+}
+
+func listGetAllHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	listId := vars["listId"]
+	query := fmt.Sprintf(
+		`WITH RECURSIVE t(id, notes, datetime1, datetime2, parent_id, title, checked) AS (
+         SELECT items.*
+         FROM items
+         JOIN lists
+         ON items.id = lists.root_item
+         WHERE lists.id = '%s'
+       UNION ALL
+         SELECT items.*
+         FROM items JOIN t
+         ON items.parent_id = t.id
+     )
+     SELECT * FROM t;`,
+		listId)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer rows.Close()
+
+	items := make([]Item, 0, MAX_NUM_ITEMS)
+	for rows.Next() {
+		var (
+			id string
+			notes sql.NullString
+			dt1 sql.NullString
+			dt2 sql.NullString
+			parentId sql.NullString
+			title string
+			checked string
+		)
+
+		err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId, &title, &checked)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		item := Item{
+			id,
+			notes.String,
+			dt1.String,
+			dt2.String,
+			parentId.String,
+			title,
+			checked,
+		}
+		items = append(items, item)
+	}
+
+	json.NewEncoder(w).Encode(items)
 }
 
 func main() {
@@ -267,7 +327,9 @@ func main() {
 		Methods("GET", "POST", "PUT")
 	r.HandleFunc("/lists/{listId}", listHandler).
 		Methods("GET", "POST", "PUT")
-	
+	r.HandleFunc("/lists/{listId}/all", listGetAllHandler).
+		Methods("GET")
+
 	srv := &http.Server{
 		Handler:      r,
 		Addr:         addr,
