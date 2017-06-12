@@ -12,6 +12,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/gorilla/mux"
 	"github.com/goware/emailx"
+	"github.com/rs/cors"
 )
 
 var db *sql.DB
@@ -101,14 +102,14 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
   fmt.Fprintln(w, "OK")
 }
 
-func newUserHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" && r.Method != "PUT" {
 		http.Error(w, "Method Not Allowed", 405)
 		return
 	}
 
 	if r.Body == nil {
-		http.Error(w, "Please send a request body", 400)
+		http.Error(w, "Request body is empty", 400)
 		return
 	}
 
@@ -129,12 +130,16 @@ func newUserHandler(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("INSERT INTO users VALUES ('%s', '%s', '%s')", u.Email, u.FirstName, u.LastName)
 	_, err = db.Query(query)
 	if err != nil {
+		isError := true
 		if strings.Contains(err.Error(), "duplicate key") {
-			http.Error(w, "That email is already registered", 400)
+			// user already registered -- just return user info
+			isError = false
+		}
+
+		if isError {
+			http.Error(w, err.Error(), 500)
 			return
 		}
-		http.Error(w, err.Error(), 500)
-		return
 	}
 
 	query = fmt.Sprintf("SELECT * FROM users WHERE email = '%s'", u.Email)
@@ -507,8 +512,8 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/", mainHandler)
 	r.HandleFunc("/db", dbHandler)
-	r.HandleFunc("/users", newUserHandler).
-		Methods("POST")
+	r.HandleFunc("/users", loginHandler).
+		Methods("POST", "PUT")
 	r.HandleFunc("/users/{userId}", userHandler).
 		Methods("GET")
 	r.HandleFunc("/users/{userId}/lists", userListsHandler).
@@ -522,8 +527,14 @@ func main() {
 	r.HandleFunc("/lists/{listId}/items", listItemsHandler).
 		Methods("GET")
 
+	c := cors.New(cors.Options{
+    AllowedOrigins: []string{"http://localhost:8081"},
+    AllowCredentials: true,
+	})
+	handler := c.Handler(r)
+
 	srv := &http.Server{
-		Handler:      r,
+		Handler:      handler,
 		Addr:         addr,
 		// Good practice: enforce timeouts for servers you create!
 		WriteTimeout: 15 * time.Second,
