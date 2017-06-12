@@ -9,6 +9,10 @@
 			"Rev": "18fca31550181693b3a834a15b74b564b3605876"
 		},
 		{
+			"ImportPath": "github.com/goware/emailx",
+			"Rev": "fbc4ef716211d08ca66746dbfaed59d4ed9dfad2"
+		},
+		{
 			"ImportPath": "github.com/lib/pq",
 			"Comment": "go1.0-cutoff-171-g8837942",
 			"Rev": "8837942c3e09574accbc5f150e2c5e057189cace"

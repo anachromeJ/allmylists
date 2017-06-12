@@ -4,18 +4,20 @@ import (
   "fmt"
 	"time"
   "os"
+	"strings"
 	"encoding/json"
   "net/http"
 	"io/ioutil"
 	"database/sql"
 	_ "github.com/lib/pq"
 	"github.com/gorilla/mux"
+	"github.com/goware/emailx"
 )
 
 var db *sql.DB
 
-const MAX_NUM_LISTS = 256 // limit on a user's owned lists
-const MAX_NUM_ITEMS = 1024 // limit on items to send with a response
+const MAX_NUM_LISTS = 2048 // limit on a user's owned lists
+const MAX_NUM_ITEMS = 65536 // limit on a user's owned items (should there be one? well yes. but how much?)
 
 type User struct {
 	Id int
@@ -51,6 +53,7 @@ func determineListenAddress() (string, error) {
 
 func mainHandler(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.String()
+	log.Println(filePath)
 
 	var bytes []byte
 	var err error
@@ -60,7 +63,7 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 		bytes, err = ioutil.ReadFile("frontend/src" + filePath)
 	}
 
-	// TODO: create a new stderr logger
+	// TODO: error code
 	if err != nil {
 		log.Println(err)
 	}
@@ -81,19 +84,56 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		email string
-		firstname sql.NullString
-		lastname sql.NullString
+		firstName sql.NullString
+		lastName sql.NullString
 	)
 
 	for rows.Next() {
-		err := rows.Scan(&email, &firstname, &lastname)
+		err := rows.Scan(&email, &firstName, &lastName)
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Println(email, firstname.String, lastname.String)
+		log.Println(email, firstName.String, lastName.String)
 	}
 
   fmt.Fprintln(w, "OK")
+}
+
+func newUserHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method Not Allowed", 405)
+		return
+	}
+
+	if r.Body == nil {
+		http.Error(w, "Please send a request body", 400)
+		return
+	}
+
+	var u User
+	err := json.NewDecoder(r.Body).Decode(&u)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	err = emailx.Validate(u.Email)
+	if err != nil {
+		http.Error(w, "Invalid email", 400)
+		return
+	}
+	fmt.Printf("%v\n", u)
+
+	query := fmt.Sprintf("INSERT INTO users VALUES ('%s', '%s', '%s')", u.Email, u.FirstName, u.LastName)
+	_, err = db.Query(query)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			http.Error(w, "That email is already registered", 400)
+			return
+		}
+		http.Error(w, err.Error(), 500)
+		return
+	}
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
@@ -108,25 +148,24 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer rows.Close()
 
-	// TODO: return 404 code
 	if !(rows.Next()) {
-		fmt.Fprintf(w, "404: user not found")
+		http.Error(w, "User not foudn", 404)
 		return
 	}
 
 	var (
 		email string
-		firstname sql.NullString
-		lastname sql.NullString
+		firstName sql.NullString
+		lastName sql.NullString
 		id int
 	)
-	err = rows.Scan(&email, &firstname, &lastname, &id)
+	err = rows.Scan(&email, &firstName, &lastName, &id)
 	if err != nil {
-		log.Println(err)
+		http.Error(w, err.Error(), 500)
 		return
 	}
 
-	user := User{id, email, firstname.String, lastname.String}
+	user := User{id, email, firstName.String, lastName.String}
 	json.NewEncoder(w).Encode(user)
 }
 
@@ -136,12 +175,13 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("SELECT * FROM lists WHERE owner = %s", userId)
 	rows, err := db.Query(query)
 	if err != nil {
-		log.Println(err)
+		http.Error(w, err.Error(), 500)
 		return
 	}
 
 	defer rows.Close()
 
+	// TODO: this'll throw an error if max is exceeded
 	lists := make([]List, 0, MAX_NUM_LISTS)
 	for rows.Next() {
 		var (
@@ -152,7 +192,7 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		err = rows.Scan(&id, &source, &root, &owner)
 		if err != nil {
-			log.Println(err)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		
@@ -160,6 +200,10 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(lists)
+}
+
+// TODO: GET and PUT
+func userItemsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // TODO: POST and PUT
@@ -246,7 +290,7 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(list)	
 }
 
-func listGetAllHandler(w http.ResponseWriter, r *http.Request) {
+func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	listId := vars["listId"]
 	query := fmt.Sprintf(
@@ -320,14 +364,18 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/", mainHandler)
 	r.HandleFunc("/db", dbHandler)
+	r.HandleFunc("/users", newUserHandler).
+		Methods("POST")
 	r.HandleFunc("/users/{userId}", userHandler).
-		Methods("GET", "POST")
+		Methods("GET")
 	r.HandleFunc("/users/{userId}/lists", userListsHandler)
+	r.HandleFunc("/users/{userId}/items", userItemsHandler).
+		Methods("GET", "PUT")
 	r.HandleFunc("/items/{itemId}", itemHandler).
 		Methods("GET", "POST", "PUT")
 	r.HandleFunc("/lists/{listId}", listHandler).
 		Methods("GET", "POST", "PUT")
-	r.HandleFunc("/lists/{listId}/all", listGetAllHandler).
+	r.HandleFunc("/lists/{listId}/items", listItemsHandler).
 		Methods("GET")
 
 	srv := &http.Server{
