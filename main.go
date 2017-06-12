@@ -31,6 +31,7 @@ type List struct {
 	Source string
 	RootItem string
 	Owner int
+	Created string
 }
 
 type Item struct {
@@ -41,6 +42,7 @@ type Item struct {
 	ParentId string
 	Title string
 	Checked string
+	Created string
 }
 
 func determineListenAddress() (string, error) {
@@ -134,6 +136,35 @@ func newUserHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+
+	query = fmt.Sprintf("SELECT * FROM users WHERE email = '%s'", u.Email)
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	defer rows.Close()
+
+	if !(rows.Next()) {
+		http.Error(w, "User does not exist", 500)
+		return
+	}
+
+	var (
+		email string
+		firstName sql.NullString
+		lastName sql.NullString
+		id int
+	)
+	err = rows.Scan(&email, &firstName, &lastName, &id)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	user := User{id, email, firstName.String, lastName.String}
+	json.NewEncoder(w).Encode(user)
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
@@ -142,14 +173,14 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", userId)
 	rows, err := db.Query(query)
 	if err != nil {
-		log.Println(err)
+		http.Error(w, err.Error(), 500)
 		return
 	}
 
 	defer rows.Close()
 
 	if !(rows.Next()) {
-		http.Error(w, "User not foudn", 404)
+		http.Error(w, "User not found", 404)
 		return
 	}
 
@@ -189,21 +220,128 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 			source string
 			root string
 			owner int
+			created string
 		)
-		err = rows.Scan(&id, &source, &root, &owner)
+		err = rows.Scan(&id, &source, &root, &owner, &created)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		
-		lists = append(lists, List{id, source, root, owner})
+		lists = append(lists, List{id, source, root, owner, created})
+	}
+
+	if r.Method == "PUT" {
+		newLists := make([]List, 0, MAX_NUM_LISTS)
+		err := json.NewDecoder(r.Body).Decode(&newLists)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		combined := make(map[string]List)
+		for _, list := range lists {
+			combined[list.Id] = list
+		}
+
+		for _, list := range newLists {
+			// TODO: do a timestamp check here
+			combined[list.Id] = list
+		}
+
+		lists = make([]List, 0, MAX_NUM_LISTS)
+		for _, value := range combined {
+			lists = append(lists, value)
+		}
 	}
 
 	json.NewEncoder(w).Encode(lists)
 }
 
-// TODO: GET and PUT
 func userItemsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userId := vars["userId"]
+	query := fmt.Sprintf(
+		`WITH RECURSIVE t(id, notes, datetime1, datetime2, parent_id, title, checked, created) AS (
+         SELECT items.*
+         FROM items
+         JOIN lists
+         ON items.id = lists.root_item
+         WHERE lists.owner = %s
+       UNION ALL
+         SELECT items.*
+         FROM items JOIN t
+         ON items.parent_id = t.id
+     )
+     SELECT * FROM t;`,
+		userId)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer rows.Close()
+
+	items := make([]Item, 0, MAX_NUM_ITEMS)
+	for rows.Next() {
+		var (
+			id string
+			notes sql.NullString
+			dt1 sql.NullString
+			dt2 sql.NullString
+			parentId sql.NullString
+			title string
+			checked string
+			created string
+		)
+
+		err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId,
+			&title, &checked, &created)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		item := Item{
+			id,
+			notes.String,
+			dt1.String,
+			dt2.String,
+			parentId.String,
+			title,
+			checked,
+			created,
+		}
+		items = append(items, item)
+	}
+
+	if r.Method == "PUT" {
+		newItems := make([]Item, 0, MAX_NUM_ITEMS)
+		err := json.NewDecoder(r.Body).Decode(&newItems)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		combined := make(map[string]Item)
+		for _, item := range items {
+			combined[item.Id] = item
+		}
+
+		for _, item := range newItems {
+			// TODO: do a timestamp check here
+			combined[item.Id] = item
+		}
+
+		items = make([]Item, 0, MAX_NUM_ITEMS)
+		for _, value := range combined {
+			items = append(items, value)
+		}
+	}
+
+	json.NewEncoder(w).Encode(items)
 }
 
 // TODO: POST and PUT
@@ -233,6 +371,7 @@ func itemHandler(w http.ResponseWriter, r *http.Request) {
 		parentId sql.NullString
 		title string
 		checked string
+		created string
 	)
 
 	err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId, &title, &checked)
@@ -249,6 +388,7 @@ func itemHandler(w http.ResponseWriter, r *http.Request) {
 		parentId.String,
 		title,
 		checked,
+		created,
 	}
 	json.NewEncoder(w).Encode(item)
 }
@@ -277,16 +417,17 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 		source string
 		root string
 		owner int
+		created string
 	)
 
-	err = rows.Scan(&id, &source, &root, &owner)
+	err = rows.Scan(&id, &source, &root, &owner, &created)
 	if err != nil {
 		// TODO: 500
 		log.Println(err)
 		return
 	}
 
-	list := List{id, source, root, owner}
+	list := List{id, source, root, owner, created}
 	json.NewEncoder(w).Encode(list)	
 }
 
@@ -294,7 +435,7 @@ func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	listId := vars["listId"]
 	query := fmt.Sprintf(
-		`WITH RECURSIVE t(id, notes, datetime1, datetime2, parent_id, title, checked) AS (
+		`WITH RECURSIVE t(id, notes, datetime1, datetime2, parent_id, title, checked, created) AS (
          SELECT items.*
          FROM items
          JOIN lists
@@ -326,6 +467,7 @@ func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 			parentId sql.NullString
 			title string
 			checked string
+			created string
 		)
 
 		err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId, &title, &checked)
@@ -342,6 +484,7 @@ func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 			parentId.String,
 			title,
 			checked,
+			created,
 		}
 		items = append(items, item)
 	}
@@ -368,7 +511,8 @@ func main() {
 		Methods("POST")
 	r.HandleFunc("/users/{userId}", userHandler).
 		Methods("GET")
-	r.HandleFunc("/users/{userId}/lists", userListsHandler)
+	r.HandleFunc("/users/{userId}/lists", userListsHandler).
+		Methods("GET", "PUT")
 	r.HandleFunc("/users/{userId}/items", userItemsHandler).
 		Methods("GET", "PUT")
 	r.HandleFunc("/items/{itemId}", itemHandler).
