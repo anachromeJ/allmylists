@@ -250,7 +250,7 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, list := range newLists {
-			// TODO: do a timestamp check here
+			// TODO: do a timestamp check here, and insert into table
 			combined[list.Id] = list
 		}
 
@@ -528,8 +528,9 @@ func main() {
 		Methods("GET")
 
 	c := cors.New(cors.Options{
-    AllowedOrigins: []string{"http://localhost:8081"},
-    AllowCredentials: true,
+		AllowedOrigins: []string{"http://localhost:*"},
+		AllowedMethods: []string{"GET", "POST", "PUT"},
+		AllowCredentials: true,
 	})
 	handler := c.Handler(r)
 
