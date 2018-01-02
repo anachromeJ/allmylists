@@ -1,80 +1,58 @@
 package main
+
 import (
-  "log"
-  "fmt"
-	"time"
-  "os"
-	"strings"
-	"encoding/json"
-  "net/http"
-	"io/ioutil"
 	"database/sql"
-	_ "github.com/lib/pq"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/gorilla/mux"
 	"github.com/goware/emailx"
+	_ "github.com/lib/pq"
 	"github.com/rs/cors"
 )
 
 var db *sql.DB
 
-const MAX_NUM_LISTS = 2048 // limit on a user's owned lists
+const MAX_NUM_LISTS = 2048  // limit on a user's owned lists
 const MAX_NUM_ITEMS = 65536 // limit on a user's owned items (should there be one? well yes. but how much?)
 
 type User struct {
-	Id int
-	Email string
+	Id        int
+	Email     string
 	FirstName string
-	LastName string
+	LastName  string
 }
 
 type List struct {
-	Id string
-	Source string
+	Id       string
+	Source   string
 	RootItem string
-	Owner int
-	Created string
+	Owner    int
+	Created  string
 }
 
 type Item struct {
-	Id string
-	Notes string
+	Id        string
+	Notes     string
 	DateTime1 string
 	DateTime2 string
-	ParentId string
-	Title string
-	Checked string
-	Created string
+	ParentId  string
+	Title     string
+	Checked   string
+	Created   string
 }
 
 func determineListenAddress() (string, error) {
-  port := os.Getenv("PORT")
-  if port == "" {
-    return "", fmt.Errorf("$PORT not set")
-  }
-  return ":" + port, nil
-}
-
-func mainHandler(w http.ResponseWriter, r *http.Request) {
-	filePath := r.URL.String()
-	log.Println(filePath)
-
-	var bytes []byte
-	var err error
-	if filePath == "/" {
-		bytes, err = ioutil.ReadFile("frontend/src/index.html")
-	} else {
-		bytes, err = ioutil.ReadFile("frontend/src" + filePath)
+	port := os.Getenv("PORT")
+	if port == "" {
+		return "", fmt.Errorf("$PORT not set")
 	}
-
-	// TODO: error code
-	if err != nil {
-		log.Println(err)
-	}
-
-	_, err = w.Write(bytes)
-	if err != nil {
-		log.Println(err)
-	}
+	return ":" + port, nil
 }
 
 func dbHandler(w http.ResponseWriter, r *http.Request) {
@@ -86,9 +64,9 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var (
-		email string
+		email     string
 		firstName sql.NullString
-		lastName sql.NullString
+		lastName  sql.NullString
 	)
 
 	for rows.Next() {
@@ -99,7 +77,7 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(email, firstName.String, lastName.String)
 	}
 
-  fmt.Fprintln(w, "OK")
+	fmt.Fprintln(w, "OK")
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -157,10 +135,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		email string
+		email     string
 		firstName sql.NullString
-		lastName sql.NullString
-		id int
+		lastName  sql.NullString
+		id        int
 	)
 	err = rows.Scan(&email, &firstName, &lastName, &id)
 	if err != nil {
@@ -190,10 +168,10 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		email string
+		email     string
 		firstName sql.NullString
-		lastName sql.NullString
-		id int
+		lastName  sql.NullString
+		id        int
 	)
 	err = rows.Scan(&email, &firstName, &lastName, &id)
 	if err != nil {
@@ -221,10 +199,10 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 	lists := make([]List, 0, MAX_NUM_LISTS)
 	for rows.Next() {
 		var (
-			id string
-			source string
-			root string
-			owner int
+			id      string
+			source  string
+			root    string
+			owner   int
 			created string
 		)
 		err = rows.Scan(&id, &source, &root, &owner, &created)
@@ -232,7 +210,7 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		
+
 		lists = append(lists, List{id, source, root, owner, created})
 	}
 
@@ -292,14 +270,14 @@ func userItemsHandler(w http.ResponseWriter, r *http.Request) {
 	items := make([]Item, 0, MAX_NUM_ITEMS)
 	for rows.Next() {
 		var (
-			id string
-			notes sql.NullString
-			dt1 sql.NullString
-			dt2 sql.NullString
+			id       string
+			notes    sql.NullString
+			dt1      sql.NullString
+			dt2      sql.NullString
 			parentId sql.NullString
-			title string
-			checked string
-			created string
+			title    string
+			checked  string
+			created  string
 		)
 
 		err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId,
@@ -369,14 +347,14 @@ func itemHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		id string
-		notes sql.NullString
-		dt1 sql.NullString
-		dt2 sql.NullString
+		id       string
+		notes    sql.NullString
+		dt1      sql.NullString
+		dt2      sql.NullString
 		parentId sql.NullString
-		title string
-		checked string
-		created string
+		title    string
+		checked  string
+		created  string
 	)
 
 	err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId, &title, &checked)
@@ -418,10 +396,10 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		id string
-		source string
-		root string
-		owner int
+		id      string
+		source  string
+		root    string
+		owner   int
 		created string
 	)
 
@@ -433,7 +411,7 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	list := List{id, source, root, owner, created}
-	json.NewEncoder(w).Encode(list)	
+	json.NewEncoder(w).Encode(list)
 }
 
 func listItemsHandler(w http.ResponseWriter, r *http.Request) {
@@ -465,14 +443,14 @@ func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 	items := make([]Item, 0, MAX_NUM_ITEMS)
 	for rows.Next() {
 		var (
-			id string
-			notes sql.NullString
-			dt1 sql.NullString
-			dt2 sql.NullString
+			id       string
+			notes    sql.NullString
+			dt1      sql.NullString
+			dt2      sql.NullString
 			parentId sql.NullString
-			title string
-			checked string
-			created string
+			title    string
+			checked  string
+			created  string
 		)
 
 		err = rows.Scan(&id, &notes, &dt1, &dt2, &parentId, &title, &checked)
@@ -498,10 +476,10 @@ func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-  addr, err := determineListenAddress()
-  if err != nil {
-    log.Fatal(err)
-  }
+	addr, err := determineListenAddress()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Println("opening connection to database")
 	db, err = sql.Open("postgres", os.Getenv("DATABASE_URL"))
@@ -510,7 +488,6 @@ func main() {
 	}
 
 	r := mux.NewRouter()
-	r.HandleFunc("/", mainHandler)
 	r.HandleFunc("/db", dbHandler)
 	r.HandleFunc("/users", loginHandler).
 		Methods("POST", "PUT")
@@ -526,17 +503,19 @@ func main() {
 		Methods("GET", "POST", "PUT")
 	r.HandleFunc("/lists/{listId}/items", listItemsHandler).
 		Methods("GET")
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/src/"))).
+		Methods("GET")
 
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"http://localhost:*"},
-		AllowedMethods: []string{"GET", "POST", "PUT"},
+		AllowedOrigins:   []string{"http://localhost:*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT"},
 		AllowCredentials: true,
 	})
 	handler := c.Handler(r)
 
 	srv := &http.Server{
-		Handler:      handler,
-		Addr:         addr,
+		Handler: handler,
+		Addr:    addr,
 		// Good practice: enforce timeouts for servers you create!
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
