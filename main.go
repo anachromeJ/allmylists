@@ -58,7 +58,7 @@ func determineListenAddress() (string, error) {
 func dbHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query("select * from users")
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 
 	defer rows.Close()
@@ -72,7 +72,7 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		err := rows.Scan(&email, &firstName, &lastName)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 		log.Println(email, firstName.String, lastName.String)
 	}
@@ -236,29 +236,32 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 
 		tx, err := db.Begin()
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 			http.Error(w, err.Error(), 500)
+			tx.Rollback()
 			return
 		}
 
 		insertStmt, err := db.Prepare(`INSERT INTO lists (id, source, root_item, owner) VALUES ($1, $2, $3, $4)`)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 			http.Error(w, err.Error(), 500)
+			tx.Rollback()
 			return
 		}
 
 		updateStmt, err := db.Prepare(`UPDATE lists SET source = ($1), root_item = ($2), owner = ($3) WHERE id = ($4)`)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 			http.Error(w, err.Error(), 500)
+			tx.Rollback()
 			return
 		}
 
 		for _, list := range inserts {
 			_, err = insertStmt.Exec(list.Id, list.Source, list.RootItem, list.Owner)
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 				http.Error(w, err.Error(), 500)
 				return
 			}
@@ -266,7 +269,7 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 		for _, list := range updates {
 			_, err = updateStmt.Exec(list.Source, list.RootItem, list.Owner, list.Id)
 			if err != nil {
-				log.Fatal(err)
+				log.Println(err)
 				http.Error(w, err.Error(), 500)
 				return
 			}
@@ -274,8 +277,9 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 
 		err = tx.Commit()
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 			http.Error(w, err.Error(), 500)
+			tx.Rollback()
 			return
 		}
 
