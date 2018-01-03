@@ -81,11 +81,6 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" && r.Method != "PUT" {
-		http.Error(w, "Method Not Allowed", 405)
-		return
-	}
-
 	if r.Body == nil {
 		http.Error(w, "Request body is empty", 400)
 		return
@@ -106,7 +101,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("%v\n", u)
 
 	query := fmt.Sprintf("INSERT INTO users VALUES ('%s', '%s', '%s')", u.Email, u.FirstName, u.LastName)
-	_, err = db.Query(query)
+	_, err = db.Exec(query)
 	if err != nil {
 		isError := true
 		if strings.Contains(err.Error(), "duplicate key") {
@@ -185,8 +180,8 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 func userListsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	userId := vars["userId"]
-	query := fmt.Sprintf("SELECT * FROM lists WHERE owner = %s", userId)
+	userID := vars["userId"]
+	query := fmt.Sprintf("SELECT * FROM lists WHERE owner = %s", userID)
 	rows, err := db.Query(query)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -227,9 +222,61 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 			combined[list.Id] = list
 		}
 
+		inserts := make([]List, len(newLists))
+		updates := make([]List, len(newLists))
 		for _, list := range newLists {
-			// TODO: do a timestamp check here, and insert into table
+			// TODO: do a timestamp check here
+			if list0, ok := combined[list.Id]; ok && list0 != list {
+				updates = append(updates, list)
+			} else {
+				inserts = append(inserts, list)
+			}
 			combined[list.Id] = list
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			log.Fatal(err)
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		insertStmt, err := db.Prepare(`INSERT INTO lists (id, source, root_item, owner) VALUES (?, ?, ?, ?)`)
+		if err != nil {
+			log.Fatal(err)
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		updateStmt, err := db.Prepare(`UPDATE lists SET source = (?), root_item = (?), owner = (?) WHERE id = (?)`)
+		if err != nil {
+			log.Fatal(err)
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		for _, list := range inserts {
+			_, err = insertStmt.Exec(list.Id, list.Source, list.RootItem, list.Owner)
+			if err != nil {
+				log.Fatal(err)
+				http.Error(w, err.Error(), 500)
+				return
+			}
+		}
+		for _, list := range updates {
+			_, err = updateStmt.Exec(list.Source, list.RootItem, list.Owner, list.Id)
+			if err != nil {
+				log.Fatal(err)
+				http.Error(w, err.Error(), 500)
+				return
+			}
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			log.Fatal(err)
+			http.Error(w, err.Error(), 500)
+			return
 		}
 
 		lists = make([]List, 0, MAX_NUM_LISTS)
@@ -342,7 +389,7 @@ func itemHandler(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: return 404 code
 	if !(rows.Next()) {
-		fmt.Fprintf(w, "404: item not found")
+		http.Error(w, "Item not found", 404)
 		return
 	}
 
@@ -379,8 +426,8 @@ func itemHandler(w http.ResponseWriter, r *http.Request) {
 // TODO: POST and PUT
 func listHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	listId := vars["listId"]
-	query := fmt.Sprintf("SELECT * FROM lists WHERE id = '%s'", listId)
+	listID := vars["listId"]
+	query := fmt.Sprintf("SELECT * FROM lists WHERE id = '%s'", listID)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -389,9 +436,8 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 
 	defer rows.Close()
 
-	// TODO: return 404 code
 	if !(rows.Next()) {
-		fmt.Fprintf(w, "404: list not found")
+		http.Error(w, "List not found", 404)
 		return
 	}
 
@@ -416,7 +462,7 @@ func listHandler(w http.ResponseWriter, r *http.Request) {
 
 func listItemsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	listId := vars["listId"]
+	listID := vars["listId"]
 	query := fmt.Sprintf(
 		`WITH RECURSIVE t(id, notes, datetime1, datetime2, parent_id, title, checked, created) AS (
          SELECT items.*
@@ -430,7 +476,7 @@ func listItemsHandler(w http.ResponseWriter, r *http.Request) {
          ON items.parent_id = t.id
      )
      SELECT * FROM t;`,
-		listId)
+		listID)
 
 	rows, err := db.Query(query)
 	if err != nil {
