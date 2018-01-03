@@ -241,14 +241,14 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		insertStmt, err := db.Prepare(`INSERT INTO lists (id, source, root_item, owner) VALUES (?, ?, ?, ?)`)
+		insertStmt, err := db.Prepare(`INSERT INTO lists (id, source, root_item, owner) VALUES ($1, $2, $3, $4)`)
 		if err != nil {
 			log.Fatal(err)
 			http.Error(w, err.Error(), 500)
 			return
 		}
 
-		updateStmt, err := db.Prepare(`UPDATE lists SET source = (?), root_item = (?), owner = (?) WHERE id = (?)`)
+		updateStmt, err := db.Prepare(`UPDATE lists SET source = ($1), root_item = ($2), owner = ($3) WHERE id = ($4)`)
 		if err != nil {
 			log.Fatal(err)
 			http.Error(w, err.Error(), 500)
@@ -377,8 +377,8 @@ func userItemsHandler(w http.ResponseWriter, r *http.Request) {
 // TODO: POST and PUT
 func itemHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	itemId := vars["itemId"]
-	query := fmt.Sprintf("SELECT * FROM items WHERE id = '%s'", itemId)
+	itemID := vars["itemId"]
+	query := fmt.Sprintf("SELECT * FROM items WHERE id = '%s'", itemID)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
