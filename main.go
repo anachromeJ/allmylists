@@ -74,9 +74,8 @@ func dbHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Println(err)
 		}
-		log.Println(email, firstName.String, lastName.String)
+		fmt.Println("adding user", email, firstName.String, lastName.String)
 	}
-
 	fmt.Fprintln(w, "OK")
 }
 
@@ -222,8 +221,8 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 			combined[list.Id] = list
 		}
 
-		inserts := make([]List, len(newLists))
-		updates := make([]List, len(newLists))
+		inserts := make([]List, 0, len(newLists))
+		updates := make([]List, 0, len(newLists))
 		for _, list := range newLists {
 			// TODO: do a timestamp check here
 			if list0, ok := combined[list.Id]; ok && list0 != list {
@@ -259,6 +258,7 @@ func userListsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, list := range inserts {
+			fmt.Println("inserting list", list.Id, list.Source, list.RootItem, list.Owner)
 			_, err = insertStmt.Exec(list.Id, list.Source, list.RootItem, list.Owner)
 			if err != nil {
 				log.Println(err)
