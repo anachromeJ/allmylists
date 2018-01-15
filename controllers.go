@@ -147,7 +147,7 @@ func syncUserLists(lists []List, newLists []List) ([]List, int, error) {
 		// TODO: do a timestamp check here
 		if list0, ok := combined[list.Id]; ok && list0 != list {
 			updates = append(updates, list)
-		} else {
+		} else if !ok {
 			inserts = append(inserts, list)
 		}
 		combined[list.Id] = list
@@ -269,7 +269,7 @@ func syncUserItems(items []Item, newItems []Item) ([]Item, int, error) {
 		// TODO: do a timestamp check here
 		if item0, ok := combined[item.ID]; ok && item0 != item {
 			updates = append(updates, item)
-		} else {
+		} else if !ok {
 			inserts = append(inserts, item)
 		}
 		combined[item.ID] = item
@@ -359,6 +359,40 @@ func denestItems(nestedItems []NestedItem) []Item {
 	return items
 }
 
+func nestItems(items []Item) []NestedItem {
+	childrenMap := make(map[string][]string)
+	for _, item := range items {
+		if val, ok := childrenMap[item.ParentId]; ok {
+			val = append(val, item.ID)
+		} else {
+			children := make([]string, 0)
+			children = append(children, item.ID)
+			childrenMap[item.ParentId] = children
+		}
+	}
+
+	nestedItems := make([]NestedItem, 0, len(items))
+	for _, item := range items {
+		children := make([]string, 0)
+		if c, ok := childrenMap[item.ID]; ok {
+			children = c
+		}
+		nestedItem := NestedItem{
+			item.ID,
+			item.Notes,
+			item.DateTime1,
+			item.DateTime2,
+			children,
+			item.Title,
+			item.Checked,
+			item.Created,
+		}
+		nestedItems = append(nestedItems, nestedItem)
+	}
+
+	return nestedItems
+}
+
 func userItemsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["userId"]
@@ -437,7 +471,9 @@ func userItemsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Printf("synced items for %s, total %d items\n", userID, len(items))
 	}
-	json.NewEncoder(w).Encode(items)
+
+	nestedItems := nestItems(items)
+	json.NewEncoder(w).Encode(nestedItems)
 }
 
 // TODO: POST and PUT
